@@ -1,0 +1,328 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny all access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Shared validation primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Entity validation helpers
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'email', 'photoURL', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.uid == request.auth.uid
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPublicAccount(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'visibility', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'photoURL', 'visibility', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.uid == request.auth.uid
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 500))
+        && data.visibility == 'public'
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAssignment(data) {
+      return data.keys().hasAll([
+          'id', 'title', 'fileName', 'fileType', 'fileSize', 'chunkCount',
+          'authorId', 'authorName', 'visibility', 'likesCount', 'commentsCount', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'title', 'fileName', 'fileType', 'fileSize', 'chunkCount',
+          'authorId', 'authorName', 'visibility', 'likesCount', 'commentsCount',
+          'lastActionCommentId', 'createdAt'
+        ])
+        && isValidId(data.id)
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 140
+        && data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 255
+        && data.fileType is string && data.fileType.size() >= 1 && data.fileType.size() <= 120
+        && data.fileSize is int && data.fileSize >= 1 && data.fileSize <= 5242880
+        && data.chunkCount is int && data.chunkCount >= 1 && data.chunkCount <= 15
+        && isValidId(data.authorId)
+        && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 100
+        && data.visibility == 'public'
+        && data.likesCount is int && data.likesCount >= 0
+        && data.commentsCount is int && data.commentsCount >= 0
+        && (!('lastActionCommentId' in data) || isValidId(data.lastActionCommentId))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidFileChunk(data) {
+      return data.keys().hasAll(['assignmentId', 'authorId', 'index', 'data', 'visibility'])
+        && data.keys().hasOnly(['assignmentId', 'authorId', 'index', 'data', 'visibility'])
+        && isValidId(data.assignmentId)
+        && isValidId(data.authorId)
+        && data.index is int && data.index >= 0 && data.index < 15
+        && data.data is string && data.data.size() >= 1 && data.data.size() <= 600000
+        && data.visibility == 'public';
+    }
+
+    function isValidAssignmentLike(data) {
+      return data.keys().hasAll(['assignmentId', 'userId', 'createdAt'])
+        && data.keys().hasOnly(['assignmentId', 'userId', 'createdAt'])
+        && isValidId(data.assignmentId)
+        && isValidId(data.userId)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAssignmentComment(data) {
+      return data.keys().hasAll(['id', 'assignmentId', 'authorId', 'authorName', 'text', 'visibility', 'createdAt'])
+        && data.keys().hasOnly(['id', 'assignmentId', 'authorId', 'authorName', 'text', 'visibility', 'createdAt'])
+        && isValidId(data.id)
+        && isValidId(data.assignmentId)
+        && isValidId(data.authorId)
+        && data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 100
+        && data.text is string && data.text.size() >= 1 && data.text.size() <= 1000
+        && data.visibility == 'public'
+        && data.createdAt is timestamp;
+    }
+
+    // Collection group rule allowing a signed-in user to list only their own likes
+    match /{path=**}/likes/{userId} {
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Private user profiles (PII strictly isolated to owner)
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'photoURL', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // Public non-PII user directory for searching accounts
+    match /publicAccounts/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && existing().visibility == 'public';
+      allow list: if isSignedIn() && resource.data.visibility == 'public';
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidPublicAccount(incoming())
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidPublicAccount(incoming())
+        && incoming().uid == existing().uid
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // Shared school assignments & projects
+    match /assignments/{assignmentId} {
+      allow get: if isSignedIn()
+        && isValidId(assignmentId)
+        && (existing().visibility == 'public' || existing().authorId == request.auth.uid);
+
+      allow list: if isSignedIn()
+        && (resource.data.visibility == 'public' || resource.data.authorId == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(assignmentId)
+        && isValidAssignment(incoming())
+        && incoming().id == assignmentId
+        && incoming().authorId == request.auth.uid
+        && incoming().likesCount == 0
+        && incoming().commentsCount == 0
+        && !('lastActionCommentId' in incoming())
+        && incoming().createdAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(assignmentId)
+        && isValidAssignment(incoming())
+        && incoming().id == existing().id
+        && incoming().authorId == existing().authorId
+        && incoming().createdAt == existing().createdAt
+        && (
+          // Action 1: Author updates assignment title
+          (existing().authorId == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly(['title']))
+          ||
+          // Action 2: User likes this assignment atomically with /likes/{uid}
+          (incoming().diff(existing()).affectedKeys().hasOnly(['likesCount'])
+            && incoming().likesCount == existing().likesCount + 1
+            && !exists(/databases/$(database)/documents/assignments/$(assignmentId)/likes/$(request.auth.uid))
+            && existsAfter(/databases/$(database)/documents/assignments/$(assignmentId)/likes/$(request.auth.uid)))
+          ||
+          // Action 3: User unlikes this assignment atomically with /likes/{uid}
+          (incoming().diff(existing()).affectedKeys().hasOnly(['likesCount'])
+            && incoming().likesCount == existing().likesCount - 1
+            && exists(/databases/$(database)/documents/assignments/$(assignmentId)/likes/$(request.auth.uid))
+            && !existsAfter(/databases/$(database)/documents/assignments/$(assignmentId)/likes/$(request.auth.uid)))
+          ||
+          // Action 4: User adds a comment atomically with /comments/{commentId}
+          (incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount', 'lastActionCommentId'])
+            && 'lastActionCommentId' in incoming()
+            && incoming().commentsCount == existing().commentsCount + 1
+            && !exists(/databases/$(database)/documents/assignments/$(assignmentId)/comments/$(incoming().lastActionCommentId))
+            && existsAfter(/databases/$(database)/documents/assignments/$(assignmentId)/comments/$(incoming().lastActionCommentId)))
+          ||
+          // Action 5: Comment author or assignment author deletes a comment atomically
+          (incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount', 'lastActionCommentId'])
+            && 'lastActionCommentId' in incoming()
+            && incoming().commentsCount == existing().commentsCount - 1
+            && exists(/databases/$(database)/documents/assignments/$(assignmentId)/comments/$(incoming().lastActionCommentId))
+            && !existsAfter(/databases/$(database)/documents/assignments/$(assignmentId)/comments/$(incoming().lastActionCommentId)))
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(assignmentId)
+        && existing().authorId == request.auth.uid;
+
+      // Chunked base64 file content
+      match /chunks/{chunkId} {
+        allow get: if isSignedIn()
+          && isValidId(assignmentId)
+          && isValidId(chunkId)
+          && existing().visibility == 'public';
+
+        allow list: if isSignedIn()
+          && resource.data.visibility == 'public';
+
+        allow create: if isVerifiedUser()
+          && isValidId(assignmentId)
+          && isValidId(chunkId)
+          && isValidFileChunk(incoming())
+          && incoming().assignmentId == assignmentId
+          && incoming().authorId == request.auth.uid
+          && existsAfter(/databases/$(database)/documents/assignments/$(assignmentId))
+          && getAfter(/databases/$(database)/documents/assignments/$(assignmentId)).data.authorId == request.auth.uid
+          && incoming().index < getAfter(/databases/$(database)/documents/assignments/$(assignmentId)).data.chunkCount;
+
+        allow update: if false;
+
+        allow delete: if isVerifiedUser()
+          && isValidId(assignmentId)
+          && isValidId(chunkId)
+          && existing().authorId == request.auth.uid;
+      }
+
+      // Per-user likes
+      match /likes/{userId} {
+        allow get: if isSignedIn()
+          && isValidId(assignmentId)
+          && isValidId(userId)
+          && (userId == request.auth.uid || exists(/databases/$(database)/documents/assignments/$(assignmentId)));
+
+        allow list: if isSignedIn()
+          && resource.data.userId == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(assignmentId)
+          && isValidId(userId)
+          && userId == request.auth.uid
+          && isValidAssignmentLike(incoming())
+          && incoming().assignmentId == assignmentId
+          && incoming().userId == request.auth.uid
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/assignments/$(assignmentId))
+          && getAfter(/databases/$(database)/documents/assignments/$(assignmentId)).data.likesCount
+             == get(/databases/$(database)/documents/assignments/$(assignmentId)).data.likesCount + 1;
+
+        allow update: if false;
+
+        allow delete: if isVerifiedUser()
+          && isValidId(assignmentId)
+          && isValidId(userId)
+          && (
+            (userId == request.auth.uid
+              && exists(/databases/$(database)/documents/assignments/$(assignmentId))
+              && existsAfter(/databases/$(database)/documents/assignments/$(assignmentId))
+              && getAfter(/databases/$(database)/documents/assignments/$(assignmentId)).data.likesCount
+                 == get(/databases/$(database)/documents/assignments/$(assignmentId)).data.likesCount - 1)
+            ||
+            (exists(/databases/$(database)/documents/assignments/$(assignmentId))
+              && get(/databases/$(database)/documents/assignments/$(assignmentId)).data.authorId == request.auth.uid
+              && !existsAfter(/databases/$(database)/documents/assignments/$(assignmentId)))
+          );
+      }
+
+      // Comments on an assignment
+      match /comments/{commentId} {
+        allow get: if isSignedIn()
+          && isValidId(assignmentId)
+          && isValidId(commentId)
+          && existing().visibility == 'public';
+
+        allow list: if isSignedIn()
+          && resource.data.visibility == 'public';
+
+        allow create: if isVerifiedUser()
+          && isValidId(assignmentId)
+          && isValidId(commentId)
+          && isValidAssignmentComment(incoming())
+          && incoming().id == commentId
+          && incoming().assignmentId == assignmentId
+          && incoming().authorId == request.auth.uid
+          && incoming().createdAt == request.time
+          && exists(/databases/$(database)/documents/assignments/$(assignmentId))
+          && getAfter(/databases/$(database)/documents/assignments/$(assignmentId)).data.commentsCount
+             == get(/databases/$(database)/documents/assignments/$(assignmentId)).data.commentsCount + 1
+          && getAfter(/databases/$(database)/documents/assignments/$(assignmentId)).data.lastActionCommentId == commentId;
+
+        allow update: if false;
+
+        allow delete: if isVerifiedUser()
+          && isValidId(assignmentId)
+          && isValidId(commentId)
+          && (
+            ((existing().authorId == request.auth.uid
+                || get(/databases/$(database)/documents/assignments/$(assignmentId)).data.authorId == request.auth.uid)
+              && existsAfter(/databases/$(database)/documents/assignments/$(assignmentId))
+              && getAfter(/databases/$(database)/documents/assignments/$(assignmentId)).data.commentsCount
+                 == get(/databases/$(database)/documents/assignments/$(assignmentId)).data.commentsCount - 1
+              && getAfter(/databases/$(database)/documents/assignments/$(assignmentId)).data.lastActionCommentId == commentId)
+            ||
+            (exists(/databases/$(database)/documents/assignments/$(assignmentId))
+              && get(/databases/$(database)/documents/assignments/$(assignmentId)).data.authorId == request.auth.uid
+              && !existsAfter(/databases/$(database)/documents/assignments/$(assignmentId)))
+          );
+      }
+    }
+  }
+}

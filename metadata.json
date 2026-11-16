@@ -1,0 +1,6 @@
+{
+  "name": "StudyDesk",
+  "description": "Upload and share school assignments and projects, manage your submissions on your dashboard, and like and comment on classmates' work.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

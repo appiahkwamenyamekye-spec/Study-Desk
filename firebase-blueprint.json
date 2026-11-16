@@ -1,0 +1,306 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private user account profile storing PII isolated to the owning user.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the user."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Public display name shown on uploaded assignments and comments."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 200,
+          "description": "User email address stored privately."
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional profile avatar URL."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when profile was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when profile was last updated."
+        }
+      },
+      "required": ["uid", "displayName", "email", "createdAt", "updatedAt"]
+    },
+    "PublicAccount": {
+      "title": "PublicAccount",
+      "description": "Public non-PII account directory entry used for searching student accounts and displaying avatars.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public"]
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "visibility", "updatedAt"]
+    },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "A school assignment or project uploaded with a title and file.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique assignment identifier."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140,
+          "description": "Title of the school assignment or project."
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "description": "Original name of the uploaded file."
+        },
+        "fileType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "MIME type of the uploaded file."
+        },
+        "fileSize": {
+          "type": "integer",
+          "description": "File size in bytes (max 5242880)."
+        },
+        "chunkCount": {
+          "type": "integer",
+          "description": "Number of base64 file chunks stored in the chunks subcollection (1 to 15)."
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the user who uploaded the assignment."
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Display name of the author."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public"],
+          "description": "Visibility scope enabling shared community listing."
+        },
+        "likesCount": {
+          "type": "integer",
+          "description": "Total number of likes on this assignment."
+        },
+        "commentsCount": {
+          "type": "integer",
+          "description": "Total number of comments on this assignment."
+        },
+        "lastActionCommentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Optional ID of the comment created or deleted during an atomic count update."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the assignment was uploaded."
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "fileName",
+        "fileType",
+        "fileSize",
+        "chunkCount",
+        "authorId",
+        "authorName",
+        "visibility",
+        "likesCount",
+        "commentsCount",
+        "createdAt"
+      ]
+    },
+    "FileChunk": {
+      "title": "FileChunk",
+      "description": "Base64 slice of an uploaded assignment file stored under 1MB.",
+      "type": "object",
+      "properties": {
+        "assignmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "index": {
+          "type": "integer",
+          "description": "Zero-based chunk index."
+        },
+        "data": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600000,
+          "description": "Base64 substring for this chunk."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public"]
+        }
+      },
+      "required": ["assignmentId", "authorId", "index", "data", "visibility"]
+    },
+    "AssignmentLike": {
+      "title": "AssignmentLike",
+      "description": "A user's like record on an assignment.",
+      "type": "object",
+      "properties": {
+        "assignmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["assignmentId", "userId", "createdAt"]
+    },
+    "AssignmentComment": {
+      "title": "AssignmentComment",
+      "description": "A comment left by a user on an assignment.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "assignmentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "assignmentId",
+        "authorId",
+        "authorName",
+        "text",
+        "visibility",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private user profiles isolated per authenticated user."
+    },
+    "/publicAccounts/{userId}": {
+      "schema": { "$ref": "#/entities/PublicAccount" },
+      "description": "Public non-PII user directory entries for account search."
+    },
+    "/assignments/{assignmentId}": {
+      "schema": { "$ref": "#/entities/Assignment" },
+      "description": "Uploaded school assignments and projects shared with signed-in users."
+    },
+    "/assignments/{assignmentId}/chunks/{chunkId}": {
+      "schema": { "$ref": "#/entities/FileChunk" },
+      "description": "Chunked base64 file content for each assignment."
+    },
+    "/assignments/{assignmentId}/likes/{userId}": {
+      "schema": { "$ref": "#/entities/AssignmentLike" },
+      "description": "Per-user like records keyed by userId."
+    },
+    "/assignments/{assignmentId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/AssignmentComment" },
+      "description": "Comments posted on an assignment."
+    }
+  }
+}
